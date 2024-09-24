@@ -1,4 +1,6 @@
-from typing import Any, Callable, Dict, Optional
+from typing import Callable, Optional, Tuple
+
+from transformers import pipeline
 
 from guardrails.validator_base import (
     FailResult,
@@ -24,8 +26,15 @@ class DetectJailbreak(Validator):
     | Programmatic fix              | `None` |
 
     Args:
-        threshold (float): A float between 0 and 1, with lower being more sensitive. A high value means the model will be fairly permissive and unlikely to flag any but the most flagrant jailbreak attempts. A low value will be pessimistic and will possible flag legitimate inquiries.
+        threshold (float): Defaults to 0.5. A float between 0 and 1, with lower being 
+        more sensitive. A high value means the model will be fairly permissive and 
+        unlikely to flag any but the most flagrant jailbreak attempts. A low value will 
+        be pessimistic and will possible flag legitimate inquiries.
     """  # noqa
+
+    MODEL_NAME = "jackhhao/jailbreak-classifier"
+    MODEL_PASS_LABEL = "benign"
+    MODEL_FAIL_LABEL = "jailbreak"
 
     # If you don't have any init args, you can omit the __init__ method.
     def __init__(
@@ -35,13 +44,64 @@ class DetectJailbreak(Validator):
     ):
         super().__init__(on_fail=on_fail)
         self.threshold = threshold
-        self.model = load_model()
+        self.model = pipeline(
+            "text-classification",
+            DetectJailbreak.MODEL_NAME
+        )
 
-    def validate(self, value: str, metadata: Optional[dict] = None) -> ValidationResult:
-        """Validates that will return a failure if the value is a jailbreak attempt."""
-        if value != "pass": # FIXME
+    @staticmethod
+    def _remap_score(score: float, safe: bool) -> float:
+        """
+        We want the model to output '0' for safe and '1' for unsafe.
+        The model has two outputs, both from 0 to 1.
+        Remap 0-1 in safe to 0.5-0.0 and 0-1 unsafe to 0.5-1.0.
+        """
+        if not (0.0 < score < 1.0):
+            # Log a sanity problem.
+            score = max(0.0, score)
+            score = min(1.0, score)
+
+        if safe:
+            return (1.0 - score)*0.5
+        else:
+            return 0.5*score + 0.5
+
+    def validate(
+            self,
+            value: Tuple[str, list[str]],
+            metadata: Optional[dict] = None
+    ) -> ValidationResult:
+        """Validates that will return a failure if the value is a jailbreak attempt.
+        If the provided value is a list of strings the validation result will be based
+        on the maximum injection likelihood.  A single validation result will be
+        returned for all.
+        """
+        if metadata:
+            pass  # Log that this model supports no metadata?
+
+        # In the case of a single string, make a one-element list -> one codepath.
+        if isinstance(value, str):
+            value = [value,]
+
+        failed_prompts = list()
+        failed_scores = list()  # To help people calibrate their thresholds.
+        predictions = self.model(value)
+
+        # Zip and evaluate predictions to return any failures.
+        for text_input, pred in zip(value, predictions):
+            score = DetectJailbreak._remap_score(
+                score=pred['score'],
+                safe=pred['label'] == self.MODEL_PASS_LABEL
+            )
+            if score > self.threshold:
+                failed_prompts.append(text_input)
+                failed_scores.append(score)
+
+        if failed_prompts:
+            failure_message = f"{len(failed_prompts)} detected as potential jailbreaks:"
+            for txt, score in zip(failed_prompts, failed_scores):
+                failure_message += f"\n\"{txt}\" (Score: {score})"
             return FailResult(
-                error_message="{A descriptive but concise error message about why validation failed}",
-                fix_value="{The programmtic fix if applicable, otherwise remove this kwarg.}",
+                error_message=failure_message
             )
         return PassResult()
