@@ -52,7 +52,7 @@ class DetectJailbreak(Validator):
         self.model = pipeline(
             "text-classification",
             DetectJailbreak.MODEL_NAME,
-            device_map=device
+            device=device
         )
 
     @staticmethod
