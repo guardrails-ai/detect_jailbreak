@@ -5,7 +5,6 @@ description = "A prompt-injection and jailbreak detector for LLMs."
 authors = [
     {name = "Guardrails AI", email = "contact@guardrailsai.com"},
     {name = "Joseph Catrambone", email="joseph@guardrailsai.com"},
-    {name = "Brian Lai", email="brian@guardrailsai.com"}
 ]
 license = {file = "LICENSE"}
 readme = "README.md"
