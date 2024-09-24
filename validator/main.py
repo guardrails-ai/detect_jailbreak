@@ -26,10 +26,14 @@ class DetectJailbreak(Validator):
     | Programmatic fix              | `None` |
 
     Args:
-        threshold (float): Defaults to 0.5. A float between 0 and 1, with lower being 
+        threshold (float): Defaults to 0.9. A float between 0 and 1, with lower being 
         more sensitive. A high value means the model will be fairly permissive and 
         unlikely to flag any but the most flagrant jailbreak attempts. A low value will 
         be pessimistic and will possible flag legitimate inquiries.
+        
+        deviec (str): Defaults to 'cpu'. The device on which the model will be run.
+        Accepts 'mps' for hardware acceleration on MacOS and 'cuda' for GPU acceleration
+        on supported hardware. A device ID can also be specified, e.g., "cuda:0".
     """  # noqa
 
     MODEL_NAME = "jackhhao/jailbreak-classifier"
@@ -39,14 +43,16 @@ class DetectJailbreak(Validator):
     # If you don't have any init args, you can omit the __init__ method.
     def __init__(
         self,
-        threshold: float = 0.5,
+        threshold: float = 0.9,
+        device: str = "cpu",
         on_fail: Optional[Callable] = None,
     ):
         super().__init__(on_fail=on_fail)
         self.threshold = threshold
         self.model = pipeline(
             "text-classification",
-            DetectJailbreak.MODEL_NAME
+            DetectJailbreak.MODEL_NAME,
+            device_map=device
         )
 
     @staticmethod
@@ -69,7 +75,7 @@ class DetectJailbreak(Validator):
     def validate(
             self,
             value: Tuple[str, list[str]],
-            metadata: Optional[dict] = None
+            metadata: Optional[dict] = None,
     ) -> ValidationResult:
         """Validates that will return a failure if the value is a jailbreak attempt.
         If the provided value is a list of strings the validation result will be based

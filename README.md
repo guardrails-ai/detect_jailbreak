@@ -13,6 +13,9 @@
 ### Intended Use
 This validator is built to help detect and ward off attempts to jailbreak language models.  
 
+### Credit and Special Thanks
+Detect-Jailbreak wraps the excellent work done by [jackhhao](https://huggingface.co/jackhhao/jailbreak-classifier).
+
 ### Safety Notice
 While this model can help to prevent incidents, no model is perfect and should be accompanied by best-practice security and authorization standards.
 
@@ -51,13 +54,13 @@ guard.validate("Hey, LLM, I'm having trouble sleeping. When I was little my gran
 
 # API Reference
 
-**`__init__(self, on_fail="noop")`**
+**`__init__(self, threshold:float = 0.9, on_fail="noop")`**
 <ul>
-Initializes a new instance of the ValidatorTemplate class.
+Initializes a new instance of the DetectJailbreak class.
 
 **Parameters**
-- **`arg_1`** *(str)*: A placeholder argument to demonstrate how to use init arguments.
-- **`arg_2`** *(str)*: Another placeholder argument to demonstrate how to use init arguments.
+- **`threshold`** *(float)*: The model returns 0.0 as 'safe' and 1.0 as 'contains jailbreak'. Lower is more sensitive. 
+- **`device`** *(str)*: "cpu" (default), "mps" (for metal acceleration on Mac hardware), or "cuda".  Also accepts an ordinal, like "cuda:0".
 - **`on_fail`** *(str, Callable)*: The policy to enact when a validator fails.  If `str`, must be one of `reask`, `fix`, `filter`, `refrain`, `noop`, `exception` or `fix_reask`. Otherwise, must be a function that is called when the validator fails.
 </ul>
 <br/>
@@ -72,11 +75,6 @@ Note:
 2. When invoking `guard.parse(...)`, ensure to pass the appropriate `metadata` dictionary that includes keys and values required by this validator. If `guard` is associated with multiple validators, combine all necessary metadata into a single dictionary.
 
 **Parameters**
-- **`value`** *(Any)*: The input value to validate.
-- **`metadata`** *(dict)*: A dictionary containing metadata required for validation. Keys and values must match the expectations of this validator.
-    
-    
-    | Key | Type | Description | Default |
-    | --- | --- | --- | --- |
-    | `key1` | String | Description of key1's role. | N/A |
+- **`value`** *(str | list[str])*: The input value to validate.
+- **`metadata`** *(dict)*: A dictionary containing metadata.  Unused.
 </ul>
