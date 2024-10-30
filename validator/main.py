@@ -59,7 +59,9 @@ class DetectJailbreak(Validator):
         self.text_classifier = pipeline(
             "text-classification",
             DetectJailbreak.TEXT_CLASSIFIER_NAME,
-            device=device
+            max_length=512,  # HACK: Fix classifier size.
+            truncation=True,
+            device=device,
         )
         # There are a large number of fairly low-effort prompts people will use.
         # The embedding detectors do checks to roughly match those.
@@ -90,8 +92,13 @@ class DetectJailbreak(Validator):
         We use the long-form to avoid a dependency on sentence transformers.
         This method returns the maximum of the matches against all known attacks.
         """
-        encoded_input = self.embedding_tokenizer(prompts, padding=True, truncation=True,
-              return_tensors='pt')
+        encoded_input = self.embedding_tokenizer(
+            prompts,
+            padding=True,
+            truncation=True,
+            return_tensors='pt',
+            max_length=512,  # This may be too small to adequately capture the info.
+        )
         with torch.no_grad():
             model_outputs = self.embedding_model(**encoded_input)
         embeddings = DetectJailbreak._mean_pool(
