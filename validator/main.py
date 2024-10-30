@@ -1,6 +1,8 @@
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional, Union
 
-from transformers import pipeline
+import torch
+from torch.nn import functional as F
+from transformers import pipeline, AutoTokenizer, AutoModel
 
 from guardrails.validator_base import (
     FailResult,
@@ -29,18 +31,22 @@ class DetectJailbreak(Validator):
         threshold (float): Defaults to 0.9. A float between 0 and 1, with lower being 
         more sensitive. A high value means the model will be fairly permissive and 
         unlikely to flag any but the most flagrant jailbreak attempts. A low value will 
-        be pessimistic and will possible flag legitimate inquiries.
+        be pessimistic and will possibly flag legitimate inquiries.
         
-        deviec (str): Defaults to 'cpu'. The device on which the model will be run.
+        device (str): Defaults to 'cpu'. The device on which the model will be run.
         Accepts 'mps' for hardware acceleration on MacOS and 'cuda' for GPU acceleration
         on supported hardware. A device ID can also be specified, e.g., "cuda:0".
     """  # noqa
 
-    MODEL_NAME = "jackhhao/jailbreak-classifier"
-    MODEL_PASS_LABEL = "benign"
-    MODEL_FAIL_LABEL = "jailbreak"
+    TEXT_CLASSIFIER_NAME = "jackhhao/jailbreak-classifier"
+    TEXT_CLASSIFIER_PASS_LABEL = "benign"
+    TEXT_CLASSIFIER_FAIL_LABEL = "jailbreak"
+    EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+    DEFAULT_KNOWN_PROMPT_MATCH_THRESHOLD = 0.9
+    MALICIOUS_EMBEDDINGS = [  # Taken from known roleplay attacks.
 
-    # If you don't have any init args, you can omit the __init__ method.
+    ]
+
     def __init__(
         self,
         threshold: float = 0.9,
@@ -48,33 +54,86 @@ class DetectJailbreak(Validator):
         on_fail: Optional[Callable] = None,
     ):
         super().__init__(on_fail=on_fail)
+        self.device = device
         self.threshold = threshold
-        self.model = pipeline(
+        self.text_classifier = pipeline(
             "text-classification",
-            DetectJailbreak.MODEL_NAME,
+            DetectJailbreak.TEXT_CLASSIFIER_NAME,
             device=device
+        )
+        # There are a large number of fairly low-effort prompts people will use.
+        # The embedding detectors do checks to roughly match those.
+        self.embedding_tokenizer = AutoTokenizer.from_pretrained(
+            DetectJailbreak.EMBEDDING_MODEL_NAME
+        )
+        self.embedding_model = AutoModel.from_pretrained(
+            DetectJailbreak.EMBEDDING_MODEL_NAME
+        ).to(device)
+        self.known_malicious_embeddings = self._embed(
+            DetectJailbreak.MALICIOUS_EMBEDDINGS
         )
 
     @staticmethod
-    def _remap_score(score: float, safe: bool) -> float:
-        """
-        We want the model to output '0' for safe and '1' for unsafe.
-        The model has two outputs, both from 0 to 1.
-        Remap 0-1 in safe to 0.5-0.0 and 0-1 unsafe to 0.5-1.0.
-        """
-        if not (0.0 < score < 1.0):
-            # Log a sanity problem.
-            score = max(0.0, score)
-            score = min(1.0, score)
+    def _mean_pool(model_output, attention_mask):
+        """Taken from https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2."""
+        # First element of model_output contains all token embeddings
+        token_embeddings = model_output[0]
+        input_mask_expanded = attention_mask.unsqueeze(-1).expand(
+            token_embeddings.size()
+        ).float()
+        return torch.sum(
+            token_embeddings * input_mask_expanded, 1
+        ) / torch.clamp(
+            input_mask_expanded.sum(1), min=1e-9
+        )
 
-        if safe:
-            return (1.0 - score)*0.5
+    def _embed(self, prompts: list[str]):
+        """Taken from https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
+        We use the long-form to avoid a dependency on sentence transformers.
+        This method returns the maximum of the matches against all known attacks.
+        """
+        encoded_input = self.embedding_tokenizer(prompts, padding=True, truncation=True,
+              return_tensors='pt')
+        with torch.no_grad():
+            model_outputs = self.embedding_model(**encoded_input)
+        embeddings = DetectJailbreak._mean_pool(
+            model_outputs, attention_mask=encoded_input['attention_mask'])
+        return F.normalize(embeddings, p=2, dim=1)
+
+    def _match_known_malicious_prompts(
+            self,
+            prompts: list[str] | torch.Tensor,
+    ) -> list[float]:
+        """Returns an array of floats, one per prompt, with the max match to known
+        attacks.  If prompts is a list of strings, embeddings will be generated.  If
+        embeddings are passed, they will be used."""
+        if isinstance(prompts, list):
+            prompt_embeddings = self._embed(prompts)
         else:
-            return 0.5*score + 0.5
+            prompt_embeddings = prompts
+        # These are already normalized. We don't need to divide by magnitudes again.
+        distances = prompt_embeddings @ self.known_malicious_embeddings.T
+        return torch.max(distances, axis=1).values.tolist()
+
+    def _predict_jailbreak(self, prompts: list[str]) -> list[float]:
+        predictions = self.text_classifier(prompts)
+        scores = list()  # We want to remap so 0 is 'safe' and 1 is 'unsafe'.
+        for pred in predictions:
+            old_score = pred['score']
+            is_safe = pred['label'] == self.TEXT_CLASSIFIER_PASS_LABEL
+            assert pred['label'] in {
+                self.TEXT_CLASSIFIER_PASS_LABEL,
+                self.TEXT_CLASSIFIER_FAIL_LABEL
+            } and 0.0 <= old_score <= 1.0
+            if is_safe:
+                scores.append(0.5 - (old_score * 0.5))
+            else:
+                scores.append(0.5 + (old_score * 0.5))
+        return scores
 
     def validate(
             self,
-            value: Tuple[str, list[str]],
+            value: Union[str, list[str]],
             metadata: Optional[dict] = None,
     ) -> ValidationResult:
         """Validates that will return a failure if the value is a jailbreak attempt.
@@ -91,17 +150,13 @@ class DetectJailbreak(Validator):
 
         failed_prompts = list()
         failed_scores = list()  # To help people calibrate their thresholds.
-        predictions = self.model(value)
 
-        # Zip and evaluate predictions to return any failures.
-        for text_input, pred in zip(value, predictions):
-            score = DetectJailbreak._remap_score(
-                score=pred['score'],
-                safe=pred['label'] == self.MODEL_PASS_LABEL
-            )
-            if score > self.threshold:
-                failed_prompts.append(text_input)
-                failed_scores.append(score)
+        known_attack_scores = self._match_known_malicious_prompts(value)
+        predicted_scores = self._predict_jailbreak(value)
+        for p, a, b in zip(value, known_attack_scores, predicted_scores):
+            if a > self.threshold or b > self.threshold:
+                failed_prompts.append(p)
+                failed_scores.append(max(a, b))
 
         if failed_prompts:
             failure_message = f"{len(failed_prompts)} detected as potential jailbreaks:"
