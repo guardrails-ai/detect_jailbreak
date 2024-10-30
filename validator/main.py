@@ -1,3 +1,4 @@
+import importlib
 from typing import Callable, Optional, Union
 
 import torch
@@ -11,6 +12,7 @@ from guardrails.validator_base import (
     Validator,
     register_validator,
 )
+from .resources import KNOWN_ATTACKS
 
 
 @register_validator(name="guardrails/detect-jailbreak", data_type="string")
@@ -43,13 +45,11 @@ class DetectJailbreak(Validator):
     TEXT_CLASSIFIER_FAIL_LABEL = "jailbreak"
     EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
     DEFAULT_KNOWN_PROMPT_MATCH_THRESHOLD = 0.9
-    MALICIOUS_EMBEDDINGS = [  # Taken from known roleplay attacks.
-
-    ]
+    MALICIOUS_EMBEDDINGS = KNOWN_ATTACKS
 
     def __init__(
         self,
-        threshold: float = 0.9,
+        threshold: float = 0.515,
         device: str = "cpu",
         on_fail: Optional[Callable] = None,
     ):
@@ -69,9 +69,7 @@ class DetectJailbreak(Validator):
         self.embedding_model = AutoModel.from_pretrained(
             DetectJailbreak.EMBEDDING_MODEL_NAME
         ).to(device)
-        self.known_malicious_embeddings = self._embed(
-            DetectJailbreak.MALICIOUS_EMBEDDINGS
-        )
+        self.known_malicious_embeddings = self._embed(KNOWN_ATTACKS)
 
     @staticmethod
     def _mean_pool(model_output, attention_mask):
