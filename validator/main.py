@@ -1,4 +1,5 @@
 import importlib
+import os
 from typing import Callable, Optional, Union
 
 import torch
@@ -13,6 +14,7 @@ from guardrails.validator_base import (
     register_validator,
 )
 from .resources import KNOWN_ATTACKS
+from .models import PromptSaturationDetectorV3
 
 
 @register_validator(name="guardrails/detect-jailbreak", data_type="string")
@@ -46,6 +48,9 @@ class DetectJailbreak(Validator):
     EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
     DEFAULT_KNOWN_PROMPT_MATCH_THRESHOLD = 0.9
     MALICIOUS_EMBEDDINGS = KNOWN_ATTACKS
+    SATURATION_CLASSIFIER_NAME = "prompt_saturation_detector_v3_1_final.pth"
+    SATURATION_CLASSIFIER_PASS_LABEL = "safe"
+    SATURATION_CLASSIFIER_FAIL_LABEL = "jailbreak"
 
     def __init__(
         self,
@@ -56,6 +61,7 @@ class DetectJailbreak(Validator):
         super().__init__(on_fail=on_fail)
         self.device = device
         self.threshold = threshold
+        self.saturation_attack_detector = PromptSaturationDetectorV3()
         self.text_classifier = pipeline(
             "text-classification",
             DetectJailbreak.TEXT_CLASSIFIER_NAME,
@@ -120,21 +126,57 @@ class DetectJailbreak(Validator):
         distances = prompt_embeddings @ self.known_malicious_embeddings.T
         return torch.max(distances, axis=1).values.tolist()
 
-    def _predict_jailbreak(self, prompts: list[str]) -> list[float]:
-        predictions = self.text_classifier(prompts)
+    def _predict_and_remap(
+            self,
+            model,
+            prompts: list[str],
+            label_field: str,
+            score_field: str,
+            safe_case: str,
+            fail_case: str,
+    ):
+        predictions = model(prompts)
         scores = list()  # We want to remap so 0 is 'safe' and 1 is 'unsafe'.
         for pred in predictions:
-            old_score = pred['score']
-            is_safe = pred['label'] == self.TEXT_CLASSIFIER_PASS_LABEL
-            assert pred['label'] in {
-                self.TEXT_CLASSIFIER_PASS_LABEL,
-                self.TEXT_CLASSIFIER_FAIL_LABEL
-            } and 0.0 <= old_score <= 1.0
+            old_score = pred[score_field]
+            is_safe = pred[label_field] == safe_case
+            assert pred[label_field] in {safe_case, fail_case} \
+                   and 0.0 <= old_score <= 1.0
             if is_safe:
                 scores.append(0.5 - (old_score * 0.5))
             else:
                 scores.append(0.5 + (old_score * 0.5))
         return scores
+
+    def _predict_jailbreak(self, prompts: list[str]) -> list[float]:
+        return self._predict_and_remap(
+            self.text_classifier,
+            prompts,
+            "label",
+            "score",
+            self.TEXT_CLASSIFIER_PASS_LABEL,
+            self.TEXT_CLASSIFIER_FAIL_LABEL,
+        )
+
+    def _predict_saturation(self, prompts: list[str]) -> list[float]:
+        return self._predict_and_remap(
+            self.saturation_attack_detector,
+            prompts,
+            "label",
+            "score",
+            self.SATURATION_CLASSIFIER_PASS_LABEL,
+            self.SATURATION_CLASSIFIER_FAIL_LABEL,
+        )
+
+    def predict_jailbreak(self, prompts: list[str]) -> list[float]:
+        known_attack_scores = self._match_known_malicious_prompts(prompts)
+        saturation_scores = self._predict_saturation(prompts)
+        predicted_scores = self._predict_jailbreak(prompts)
+        return [
+            max(subscores)
+            for subscores in
+            zip(known_attack_scores, saturation_scores, predicted_scores)
+        ]
 
     def validate(
             self,
@@ -151,17 +193,17 @@ class DetectJailbreak(Validator):
 
         # In the case of a single string, make a one-element list -> one codepath.
         if isinstance(value, str):
-            value = [value,]
+            prompts = [value, ]
+
+        scores = self.predict_jailbreak(value)
 
         failed_prompts = list()
         failed_scores = list()  # To help people calibrate their thresholds.
 
-        known_attack_scores = self._match_known_malicious_prompts(value)
-        predicted_scores = self._predict_jailbreak(value)
-        for p, a, b in zip(value, known_attack_scores, predicted_scores):
-            if a > self.threshold or b > self.threshold:
+        for p, score in zip(value, scores):
+            if score > self.threshold:
                 failed_prompts.append(p)
-                failed_scores.append(max(a, b))
+                failed_scores.append(score)
 
         if failed_prompts:
             failure_message = f"{len(failed_prompts)} detected as potential jailbreaks:"
