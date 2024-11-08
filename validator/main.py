@@ -104,7 +104,7 @@ class DetectJailbreak(Validator):
             truncation=True,
             return_tensors='pt',
             max_length=512,  # This may be too small to adequately capture the info.
-        )
+        ).to(self.device)
         with torch.no_grad():
             model_outputs = self.embedding_model(**encoded_input)
         embeddings = DetectJailbreak._mean_pool(
