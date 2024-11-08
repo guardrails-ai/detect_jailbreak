@@ -42,9 +42,9 @@ class DetectJailbreak(Validator):
         on supported hardware. A device ID can also be specified, e.g., "cuda:0".
     """  # noqa
 
-    TEXT_CLASSIFIER_NAME = "jackhhao/jailbreak-classifier"
-    TEXT_CLASSIFIER_PASS_LABEL = "benign"
-    TEXT_CLASSIFIER_FAIL_LABEL = "jailbreak"
+    TEXT_CLASSIFIER_NAME = "zhx123/ftrobertallm"
+    TEXT_CLASSIFIER_PASS_LABEL = 0
+    TEXT_CLASSIFIER_FAIL_LABEL = 1
     EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
     DEFAULT_KNOWN_PROMPT_MATCH_THRESHOLD = 0.9
     MALICIOUS_EMBEDDINGS = KNOWN_ATTACKS
@@ -168,15 +168,29 @@ class DetectJailbreak(Validator):
             self.SATURATION_CLASSIFIER_FAIL_LABEL,
         )
 
-    def predict_jailbreak(self, prompts: list[str]) -> list[float]:
+    def predict_jailbreak(
+            self,
+            prompts: list[str],
+            reduction_function: Optional[Callable] = max,
+    ) -> Union[list[float], list[dict]]:
         known_attack_scores = self._match_known_malicious_prompts(prompts)
         saturation_scores = self._predict_saturation(prompts)
         predicted_scores = self._predict_jailbreak(prompts)
-        return [
-            max(subscores)
-            for subscores in
-            zip(known_attack_scores, saturation_scores, predicted_scores)
-        ]
+        if reduction_function is None:
+            return [{
+                "known_attack": known,
+                "saturation_attack": sat,
+                "other_attack": pred
+            } for known, sat, pred in zip(
+                known_attack_scores, saturation_scores, predicted_scores
+            )]
+        else:
+            return [
+                reduction_function(subscores)
+                for subscores in
+                zip(known_attack_scores, saturation_scores, predicted_scores)
+            ]
+
 
     def validate(
             self,
@@ -193,7 +207,7 @@ class DetectJailbreak(Validator):
 
         # In the case of a single string, make a one-element list -> one codepath.
         if isinstance(value, str):
-            prompts = [value, ]
+            value = [value, ]
 
         scores = self.predict_jailbreak(value)
 
