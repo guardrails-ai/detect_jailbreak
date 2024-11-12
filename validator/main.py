@@ -31,7 +31,7 @@ class DetectJailbreak(Validator):
     | Programmatic fix              | `None` |
 
     Args:
-        threshold (float): Defaults to 0.9. A float between 0 and 1, with lower being 
+        threshold (float): Defaults to 0.81. A float between 0 and 1, with lower being 
         more sensitive. A high value means the model will be fairly permissive and 
         unlikely to flag any but the most flagrant jailbreak attempts. A low value will 
         be pessimistic and will possibly flag legitimate inquiries.
