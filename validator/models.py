@@ -1,8 +1,13 @@
+import os
+from pathlib import Path
 from typing import Optional, Union
 
 import numpy
 import torch
 import torch.nn as nn
+from cached_path import cached_path
+
+from .resources import get_tokenizer_and_model_by_path
 
 
 def string_to_one_hot_tensor(
@@ -145,20 +150,35 @@ class PromptSaturationDetectorV2(nn.Module):
 class PromptSaturationDetectorV3:  # Note: Not nn.Module.
     # This is a dumb convenience wrapper for a pipeline.  It sets up a bunch of
     # tokenizer settings that we need and turns this into something like a pipeline.
-    def __init__(self, device: torch.device = torch.device('cpu')):
+    def __init__(
+            self,
+            device: torch.device = torch.device('cpu'),
+            model_path_override: str = ""
+    ):
         from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
-        #self.model = torch.load(model_pth, map_location=device)
-        self.model = AutoModelForSequenceClassification.from_pretrained(
-            "GuardrailsAI/prompt-saturation-attack-detector",
-        )
+        if not model_path_override:
+            self.model = AutoModelForSequenceClassification.from_pretrained(
+                "GuardrailsAI/prompt-saturation-attack-detector",
+            )
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                "google-bert/bert-base-cased",
+                truncation_side='left',
+                max_length=512,
+                truncation=True,
+                padding=True,
+            )
+        else:
+            tokenizer, model = get_tokenizer_and_model_by_path(
+                model_path_override,
+                "prompt-saturation-attack",
+                AutoTokenizer,
+                AutoModelForSequenceClassification
+            )
+            self.tokenizer = tokenizer
+            self.model = model
+
         self.model.config.id2label = {0: 'safe', 1: 'jailbreak'}
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            "google-bert/bert-base-cased",
-            truncation_side='left',
-            max_length=512,
-            truncation=True,
-            padding=True,
-        )
+
         self.pipe = pipeline(
             "text-classification",
             model=self.model,

@@ -12,7 +12,7 @@ from guardrails.validator_base import (
     Validator,
     register_validator,
 )
-from .resources import KNOWN_ATTACKS
+from .resources import KNOWN_ATTACKS, get_tokenizer_and_model_by_path, get_pipeline_by_path
 from .models import PromptSaturationDetectorV3
 
 
@@ -39,6 +39,8 @@ class DetectJailbreak(Validator):
         device (str): Defaults to 'cpu'. The device on which the model will be run.
         Accepts 'mps' for hardware acceleration on MacOS and 'cuda' for GPU acceleration
         on supported hardware. A device ID can also be specified, e.g., "cuda:0".
+        
+        model_path_override (str): A pointer to an ensemble tar file in S3 or on disk.
     """  # noqa
 
     TEXT_CLASSIFIER_NAME = "zhx123/ftrobertallm"
@@ -58,30 +60,61 @@ class DetectJailbreak(Validator):
     DEFAULT_TEXT_CLASSIFIER_SCALE_FACTORS = (3.0, 2.5)
 
     def __init__(
-        self,
-        threshold: float = 0.81,
-        device: str = "cpu",
-        on_fail: Optional[Callable] = None,
+            self,
+            threshold: float = 0.81,
+            device: str = "cpu",
+            on_fail: Optional[Callable] = None,
+            model_path_override: str = "",
     ):
         super().__init__(on_fail=on_fail)
         self.device = device
         self.threshold = threshold
-        self.saturation_attack_detector = PromptSaturationDetectorV3()
-        self.text_classifier = pipeline(
-            "text-classification",
-            DetectJailbreak.TEXT_CLASSIFIER_NAME,
-            max_length=512,  # HACK: Fix classifier size.
-            truncation=True,
-            device=device,
-        )
-        # There are a large number of fairly low-effort prompts people will use.
-        # The embedding detectors do checks to roughly match those.
-        self.embedding_tokenizer = AutoTokenizer.from_pretrained(
-            DetectJailbreak.EMBEDDING_MODEL_NAME
-        )
-        self.embedding_model = AutoModel.from_pretrained(
-            DetectJailbreak.EMBEDDING_MODEL_NAME
-        ).to(device)
+
+        if not model_path_override:
+            self.saturation_attack_detector = PromptSaturationDetectorV3(
+                device=torch.device(device),
+            )
+            self.text_classifier = pipeline(
+                "text-classification",
+                DetectJailbreak.TEXT_CLASSIFIER_NAME,
+                max_length=512,  # HACK: Fix classifier size.
+                truncation=True,
+                device=device,
+            )
+            # There are a large number of fairly low-effort prompts people will use.
+            # The embedding detectors do checks to roughly match those.
+            self.embedding_tokenizer = AutoTokenizer.from_pretrained(
+                DetectJailbreak.EMBEDDING_MODEL_NAME
+            )
+            self.embedding_model = AutoModel.from_pretrained(
+                DetectJailbreak.EMBEDDING_MODEL_NAME
+            ).to(device)
+        else:
+            # Saturation:
+            self.saturation_attack_detector = PromptSaturationDetectorV3(
+                device=torch.device(device),
+                model_path_override=model_path_override
+            )
+            # Known attacks:
+            embedding_tokenizer, embedding_model = get_tokenizer_and_model_by_path(
+                model_path_override,
+                "embedding",
+                AutoTokenizer,
+                AutoModel
+            )
+            self.embedding_tokenizer = embedding_tokenizer
+            self.embedding_model = embedding_model
+            # Other text attacks:
+            self.text_classifier = get_pipeline_by_path(
+                model_path_override,
+                "text-classifier",
+                "text-classification",
+                max_length=512,
+                truncation=True,
+                device=device
+            )
+
+        # Quick compute on startup:
         self.known_malicious_embeddings = self._embed(KNOWN_ATTACKS)
 
         # These _are_ modifyable, but not explicitly advertised.
