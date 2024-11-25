@@ -1,9 +1,10 @@
 # app_inference_spec.py
-# Forked from spec: https://github.com/guardrails-ai/models-host/tree/main/ray#adding-new-inference-endpoints
+# Forked from spec:
+# github.com/guardrails-ai/models-host/tree/main/ray#adding-new-inference-endpoints
 import os
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import HTTPException
 from pydantic import BaseModel
 from models_host.base_inference_spec import BaseInferenceSpec
 
@@ -40,7 +41,7 @@ class InferenceSpec(BaseInferenceSpec):
     def process_request(self, input_request: InputRequest):
         message = input_request.message
         # If needed, sanity check.
-        #raise HTTPException(status_code=400, detail="Invalid input format")
+        # raise HTTPException(status_code=400, detail="Invalid input format")
         args = (message,)
         kwargs = {}
         if input_request.threshold is not None:
