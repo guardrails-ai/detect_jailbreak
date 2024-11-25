@@ -12,7 +12,7 @@ from validator import DetectJailbreak
 
 class InputRequest(BaseModel):
     message: str
-    threshold: Optional[float]
+    threshold: Optional[float] = None
 
 
 class OutputResponse(BaseModel):
@@ -23,7 +23,8 @@ class OutputResponse(BaseModel):
 
 # Using same nomenclature as in Sagemaker classes
 class InferenceSpec(BaseInferenceSpec):
-    model = None
+    def __init__(self):
+        self.model = None
 
     @property
     def device_name(self):
@@ -34,7 +35,7 @@ class InferenceSpec(BaseInferenceSpec):
 
     def load(self):
         print(f"Loading model DetectJailbreak and moving to {self.device_name}...")
-        self.model = DetectJailbreak(device=self.device_name),
+        self.model = DetectJailbreak(device=self.device_name)
 
     def process_request(self, input_request: InputRequest):
         message = input_request.message
@@ -56,7 +57,7 @@ class InferenceSpec(BaseInferenceSpec):
         if threshold is None:
             threshold = 0.81
 
-        score = self.model.predict_jailbreak([message,])
+        score = self.model.predict_jailbreak([message,])[0]
         if score > threshold:
             classification = "jailbreak"
             is_jailbreak = True
