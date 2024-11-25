@@ -1,17 +1,14 @@
-import os
-from pathlib import Path
 from typing import Optional, Union
 
 import numpy
 import torch
 import torch.nn as nn
-from cached_path import cached_path
 
 from .resources import get_tokenizer_and_model_by_path
 
 
 def string_to_one_hot_tensor(
-        text: Union[str, list[str]],
+        text: Union[str, list[str], tuple[str]],
         max_length: int = 2048,
         left_truncate: bool = True,
 ) -> torch.Tensor:
@@ -32,10 +29,14 @@ def string_to_one_hot_tensor(
         for idx, t in enumerate(text):
             if left_truncate:
                 t = t[-max_length:]
-                out[idx, -len(t):, :] = string_to_one_hot_tensor(t, max_length, left_truncate)[0, :, :]
+                out[idx, -len(t):, :] = string_to_one_hot_tensor(
+                    t, max_length, left_truncate
+                )[0, :, :]
             else:
                 t = t[:max_length]
-                out[idx, :len(t), :] = string_to_one_hot_tensor(t, max_length, left_truncate)[0, :, :]
+                out[idx, :len(t), :] = string_to_one_hot_tensor(
+                    t, max_length, left_truncate
+                )[0, :, :]
     else:
         raise Exception("Input was neither a string nor a list of strings.")
     return out
@@ -80,7 +81,7 @@ class PromptSaturationDetectorV0(nn.Module):
         x = self.fan_in(x)
         x = self.lstm1(x)[0]
         x = self.output_head(x)
-        x = x[:,-1,0]
+        x = x[:, -1, 0]
         x = self.output_activation(x)
         return x
 
@@ -124,9 +125,14 @@ class PromptSaturationDetectorV2(nn.Module):
             longest_sequence = len(x[0])
             x = torch.LongTensor(x).to(self.get_current_device())
             # TODO: is 1 masked or unmasked?
-            attention_mask = torch.LongTensor([1] * longest_sequence).to(self.get_current_device())
+            attention_mask = torch.LongTensor(
+                [1] * longest_sequence
+            ).to(self.get_current_device())
         elif isinstance(x, list) or isinstance(x, tuple):
-            sequences = [self.tokenizer.encode(text, add_special_tokens=True)[-max_size:] for text in x]
+            sequences = [
+                self.tokenizer.encode(text, add_special_tokens=True)[-max_size:]
+                for text in x
+            ]
             for token_list in sequences:
                 longest_sequence = max(longest_sequence, len(token_list))
             x = list()
@@ -135,16 +141,28 @@ class PromptSaturationDetectorV2(nn.Module):
                 x.append(
                     ([self.pad_token] * (longest_sequence - len(sequence))) + sequence
                 )
-                attention_mask.append([0] * (longest_sequence - len(sequence)) + [1] * len(sequence))
+                attention_mask.append(
+                    [0] * (longest_sequence - len(sequence)) + [1] * len(sequence)
+                )
             x = torch.LongTensor(x).to(self.get_current_device())
             attention_mask = torch.tensor(attention_mask).to(self.get_current_device())
 
-        #segments_ids = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
-        segments_tensors = torch.zeros(x.shape, dtype=torch.int).to(self.get_current_device())
+        # segments_ids = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
+        segments_tensors = torch.zeros(x.shape, dtype=torch.int) \
+            .to(self.get_current_device())
         if y is not None:
-            return self.transformer(x, token_type_ids=segments_tensors, attention_mask=attention_mask, labels=y)
+            return self.transformer(
+                x,
+                token_type_ids=segments_tensors,
+                attention_mask=attention_mask,
+                labels=y
+            )
         else:
-            return self.transformer(x, token_type_ids=segments_tensors, attention_mask=attention_mask).logits
+            return self.transformer(
+                x,
+                token_type_ids=segments_tensors,
+                attention_mask=attention_mask
+            ).logits
 
 
 class PromptSaturationDetectorV3:  # Note: Not nn.Module.
@@ -155,7 +173,9 @@ class PromptSaturationDetectorV3:  # Note: Not nn.Module.
             device: torch.device = torch.device('cpu'),
             model_path_override: str = ""
     ):
-        from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
+        from transformers import (
+            pipeline, AutoTokenizer, AutoModelForSequenceClassification
+        )
         if not model_path_override:
             self.model = AutoModelForSequenceClassification.from_pretrained(
                 "GuardrailsAI/prompt-saturation-attack-detector",
