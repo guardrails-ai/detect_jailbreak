@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import List, Tuple, Optional, Union
 
 import numpy
 import torch
@@ -8,7 +8,7 @@ from .resources import get_tokenizer_and_model_by_path
 
 
 def string_to_one_hot_tensor(
-        text: Union[str, list[str], tuple[str]],
+        text: Union[str, List[str], Tuple[str]],
         max_length: int = 2048,
         left_truncate: bool = True,
 ) -> torch.Tensor:
@@ -71,7 +71,7 @@ class PromptSaturationDetectorV0(nn.Module):
 
     def forward(
             self,
-            x: Union[str, list[str], numpy.ndarray, torch.Tensor]
+            x: Union[str, List[str], numpy.ndarray, torch.Tensor]
     ) -> torch.Tensor:
         if isinstance(x, str) or isinstance(x, list) or isinstance(x, tuple):
             x = string_to_one_hot_tensor(x).to(self.get_current_device())
@@ -113,7 +113,7 @@ class PromptSaturationDetectorV2(nn.Module):
 
     def forward(
             self,
-            x: Union[str, list[str], numpy.ndarray, torch.Tensor],
+            x: Union[str, List[str], numpy.ndarray, torch.Tensor],
             y: Optional[torch.Tensor] = None,
             attention_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
@@ -209,5 +209,5 @@ class PromptSaturationDetectorV3:  # Note: Not nn.Module.
             device=device,
         )
 
-    def __call__(self, text: Union[str, list[str]]) -> list[dict]:
+    def __call__(self, text: Union[str, List[str]]) -> List[dict]:
         return self.pipe(text)
