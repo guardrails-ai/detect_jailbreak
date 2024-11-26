@@ -3,12 +3,22 @@
 # github.com/guardrails-ai/models-host/tree/main/ray#adding-new-inference-endpoints
 import os
 from typing import Optional
+from logging import getLogger
 
 from fastapi import HTTPException
 from pydantic import BaseModel
 from models_host.base_inference_spec import BaseInferenceSpec
 
 from validator import DetectJailbreak
+
+
+# Environment variables:
+# MODEL_PATH - "s3" (default) read model from MODEL_S3_PATH, "hf" read from huggingface.
+# MODEL_S3_PATH - Defaults to
+#   s3://guardrails-ai-public-read-only/detect-jailbreak-v0/detect-jailbreak-v0.tar.gz
+# HF_TOKEN - if set, will read model from HF.
+
+logger = getLogger(__name__)
 
 
 class InputRequest(BaseModel):
@@ -35,8 +45,23 @@ class InferenceSpec(BaseInferenceSpec):
         return torch_device
 
     def load(self):
+        kwargs = {
+            "device": self.device_name
+        }
+        read_from = os.environ.get("MODEL_PATH", "s3").lower()
+        if read_from == "s3":
+            print("Reading model from S3.")
+            kwargs["model_path_override"] = os.environ.get(
+                "MODEL_S3_PATH",
+                "s3://guardrails-ai-public-read-only/detect-jailbreak-v0/detect-jailbreak-v0.tar.gz"
+            )
+        elif read_from == "hf":
+            print("Reading model from HF.")
+            pass  # Auto read from HF by default.
+        else:
+            logger.warning(f"MODEL_PATH is not set to 's3' or 'hf': '{read_from}'")
         print(f"Loading model DetectJailbreak and moving to {self.device_name}...")
-        self.model = DetectJailbreak(device=self.device_name)
+        self.model = DetectJailbreak(**kwargs)
 
     def process_request(self, input_request: InputRequest):
         message = input_request.message
