@@ -3,6 +3,7 @@
 # github.com/guardrails-ai/models-host/tree/main/ray#adding-new-inference-endpoints
 import os
 from logging import getLogger
+from typing import List
 
 from pydantic import BaseModel
 from models_host.base_inference_spec import BaseInferenceSpec
@@ -20,11 +21,11 @@ logger = getLogger(__name__)
 
 
 class InputRequest(BaseModel):
-    message: str
+    prompts: List[str]
 
 
 class OutputResponse(BaseModel):
-    score: float
+    scores: List[float]
 
 
 # Using same nomenclature as in Sagemaker classes
@@ -59,14 +60,14 @@ class InferenceSpec(BaseInferenceSpec):
         self.model = DetectJailbreak(**kwargs)
 
     def process_request(self, input_request: InputRequest):
-        message = input_request.message
+        prompts = input_request.prompts
         # If needed, sanity check.
         # raise HTTPException(status_code=400, detail="Invalid input format")
-        args = (message,)
+        args = (prompts,)
         kwargs = {}
         return args, kwargs
 
-    def infer(self, message: str) -> OutputResponse:
+    def infer(self, prompts: List[str]) -> OutputResponse:
         return OutputResponse(
-            score=self.model.predict_jailbreak([message,])[0],
+            scores=self.model.predict_jailbreak(prompts),
         )

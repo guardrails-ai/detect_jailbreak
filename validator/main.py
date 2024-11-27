@@ -71,53 +71,59 @@ class DetectJailbreak(Validator):
         super().__init__(on_fail=on_fail, **kwargs)
         self.device = device
         self.threshold = threshold
+        self.saturation_attack_detector = None
+        self.text_classifier = None
+        self.embedding_tokenizer = None
+        self.embedding_model = None
+        self.known_malicious_embeddings = []
 
-        if not model_path_override:
-            self.saturation_attack_detector = PromptSaturationDetectorV3(
-                device=torch.device(device),
-            )
-            self.text_classifier = pipeline(
-                "text-classification",
-                DetectJailbreak.TEXT_CLASSIFIER_NAME,
-                max_length=512,  # HACK: Fix classifier size.
-                truncation=True,
-                device=device,
-            )
-            # There are a large number of fairly low-effort prompts people will use.
-            # The embedding detectors do checks to roughly match those.
-            self.embedding_tokenizer = AutoTokenizer.from_pretrained(
-                DetectJailbreak.EMBEDDING_MODEL_NAME
-            )
-            self.embedding_model = AutoModel.from_pretrained(
-                DetectJailbreak.EMBEDDING_MODEL_NAME
-            ).to(device)
-        else:
-            # Saturation:
-            self.saturation_attack_detector = PromptSaturationDetectorV3(
-                device=torch.device(device),
-                model_path_override=model_path_override
-            )
-            # Known attacks:
-            embedding_tokenizer, embedding_model = get_tokenizer_and_model_by_path(
-                model_path_override,
-                "embedding",
-                AutoTokenizer,
-                AutoModel
-            )
-            self.embedding_tokenizer = embedding_tokenizer
-            self.embedding_model = embedding_model.to(device)
-            # Other text attacks:
-            self.text_classifier = get_pipeline_by_path(
-                model_path_override,
-                "text-classifier",
-                "text-classification",
-                max_length=512,
-                truncation=True,
-                device=device
-            )
+        if self.use_local:
+            if not model_path_override:
+                self.saturation_attack_detector = PromptSaturationDetectorV3(
+                    device=torch.device(device),
+                )
+                self.text_classifier = pipeline(
+                    "text-classification",
+                    DetectJailbreak.TEXT_CLASSIFIER_NAME,
+                    max_length=512,  # HACK: Fix classifier size.
+                    truncation=True,
+                    device=device,
+                )
+                # There are a large number of fairly low-effort prompts people will use.
+                # The embedding detectors do checks to roughly match those.
+                self.embedding_tokenizer = AutoTokenizer.from_pretrained(
+                    DetectJailbreak.EMBEDDING_MODEL_NAME
+                )
+                self.embedding_model = AutoModel.from_pretrained(
+                    DetectJailbreak.EMBEDDING_MODEL_NAME
+                ).to(device)
+            else:
+                # Saturation:
+                self.saturation_attack_detector = PromptSaturationDetectorV3(
+                    device=torch.device(device),
+                    model_path_override=model_path_override
+                )
+                # Known attacks:
+                embedding_tokenizer, embedding_model = get_tokenizer_and_model_by_path(
+                    model_path_override,
+                    "embedding",
+                    AutoTokenizer,
+                    AutoModel
+                )
+                self.embedding_tokenizer = embedding_tokenizer
+                self.embedding_model = embedding_model.to(device)
+                # Other text attacks:
+                self.text_classifier = get_pipeline_by_path(
+                    model_path_override,
+                    "text-classifier",
+                    "text-classification",
+                    max_length=512,
+                    truncation=True,
+                    device=device
+                )
 
-        # Quick compute on startup:
-        self.known_malicious_embeddings = self._embed(KNOWN_ATTACKS)
+            # Quick compute on startup:
+            self.known_malicious_embeddings = self._embed(KNOWN_ATTACKS)
 
         # These _are_ modifyable, but not explicitly advertised.
         self.known_attack_scales = DetectJailbreak.DEFAULT_KNOWN_ATTACK_SCALE_FACTORS
@@ -303,9 +309,9 @@ class DetectJailbreak(Validator):
     def _inference_remote(self, model_input: List[str]) -> Any:
         # This needs to be kept in-sync with app_inference_spec.
         request_body = {
-            "inputs": [
+            "inputs": [  # Required for legacy reasons.
                 {
-                    "name": "message",
+                    "name": "prompts",
                     "shape": [len(model_input)],
                     "data": model_input,
                     "datatype": "BYTES"
@@ -316,8 +322,7 @@ class DetectJailbreak(Validator):
             json.dumps(request_body),
             self.validation_endpoint
         )
-        if not response or "outputs" not in response:
+        if not response or "scores" not in response:
             raise ValueError("Invalid response from remote inference", response)
 
-        data = [output["score"] for output in response["outputs"]]
-        return data
+        return response["scores"]
