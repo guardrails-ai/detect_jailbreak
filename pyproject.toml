@@ -1,6 +1,6 @@
 [project]
 name = "detect-jailbreak"
-version = "0.1.2"
+version = "0.1.3"
 description = "A prompt-injection and jailbreak detector for LLMs."
 authors = [
     {name = "Guardrails AI", email = "contact@guardrailsai.com"},
