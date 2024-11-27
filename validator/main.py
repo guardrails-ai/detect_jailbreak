@@ -17,7 +17,7 @@ from .resources import KNOWN_ATTACKS, get_tokenizer_and_model_by_path, get_pipel
 from .models import PromptSaturationDetectorV3
 
 
-@register_validator(name="guardrails/detect-jailbreak", data_type="string")
+@register_validator(name="guardrails/detect_jailbreak", data_type="string")
 class DetectJailbreak(Validator):
     """Validates that a prompt does not attempt to circumvent restrictions on behavior.
     An example would be convincing the model via prompt to provide instructions that 
