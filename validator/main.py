@@ -1,5 +1,6 @@
+import json
 import math
-from typing import Callable, List, Optional, Union
+from typing import Callable, List, Optional, Union, Any
 
 import torch
 from torch.nn import functional as F
@@ -65,57 +66,64 @@ class DetectJailbreak(Validator):
             device: str = "cpu",
             on_fail: Optional[Callable] = None,
             model_path_override: str = "",
+            **kwargs,
     ):
-        super().__init__(on_fail=on_fail)
+        super().__init__(on_fail=on_fail, **kwargs)
         self.device = device
         self.threshold = threshold
+        self.saturation_attack_detector = None
+        self.text_classifier = None
+        self.embedding_tokenizer = None
+        self.embedding_model = None
+        self.known_malicious_embeddings = []
 
-        if not model_path_override:
-            self.saturation_attack_detector = PromptSaturationDetectorV3(
-                device=torch.device(device),
-            )
-            self.text_classifier = pipeline(
-                "text-classification",
-                DetectJailbreak.TEXT_CLASSIFIER_NAME,
-                max_length=512,  # HACK: Fix classifier size.
-                truncation=True,
-                device=device,
-            )
-            # There are a large number of fairly low-effort prompts people will use.
-            # The embedding detectors do checks to roughly match those.
-            self.embedding_tokenizer = AutoTokenizer.from_pretrained(
-                DetectJailbreak.EMBEDDING_MODEL_NAME
-            )
-            self.embedding_model = AutoModel.from_pretrained(
-                DetectJailbreak.EMBEDDING_MODEL_NAME
-            ).to(device)
-        else:
-            # Saturation:
-            self.saturation_attack_detector = PromptSaturationDetectorV3(
-                device=torch.device(device),
-                model_path_override=model_path_override
-            )
-            # Known attacks:
-            embedding_tokenizer, embedding_model = get_tokenizer_and_model_by_path(
-                model_path_override,
-                "embedding",
-                AutoTokenizer,
-                AutoModel
-            )
-            self.embedding_tokenizer = embedding_tokenizer
-            self.embedding_model = embedding_model.to(device)
-            # Other text attacks:
-            self.text_classifier = get_pipeline_by_path(
-                model_path_override,
-                "text-classifier",
-                "text-classification",
-                max_length=512,
-                truncation=True,
-                device=device
-            )
+        if self.use_local:
+            if not model_path_override:
+                self.saturation_attack_detector = PromptSaturationDetectorV3(
+                    device=torch.device(device),
+                )
+                self.text_classifier = pipeline(
+                    "text-classification",
+                    DetectJailbreak.TEXT_CLASSIFIER_NAME,
+                    max_length=512,  # HACK: Fix classifier size.
+                    truncation=True,
+                    device=device,
+                )
+                # There are a large number of fairly low-effort prompts people will use.
+                # The embedding detectors do checks to roughly match those.
+                self.embedding_tokenizer = AutoTokenizer.from_pretrained(
+                    DetectJailbreak.EMBEDDING_MODEL_NAME
+                )
+                self.embedding_model = AutoModel.from_pretrained(
+                    DetectJailbreak.EMBEDDING_MODEL_NAME
+                ).to(device)
+            else:
+                # Saturation:
+                self.saturation_attack_detector = PromptSaturationDetectorV3(
+                    device=torch.device(device),
+                    model_path_override=model_path_override
+                )
+                # Known attacks:
+                embedding_tokenizer, embedding_model = get_tokenizer_and_model_by_path(
+                    model_path_override,
+                    "embedding",
+                    AutoTokenizer,
+                    AutoModel
+                )
+                self.embedding_tokenizer = embedding_tokenizer
+                self.embedding_model = embedding_model.to(device)
+                # Other text attacks:
+                self.text_classifier = get_pipeline_by_path(
+                    model_path_override,
+                    "text-classifier",
+                    "text-classification",
+                    max_length=512,
+                    truncation=True,
+                    device=device
+                )
 
-        # Quick compute on startup:
-        self.known_malicious_embeddings = self._embed(KNOWN_ATTACKS)
+            # Quick compute on startup:
+            self.known_malicious_embeddings = self._embed(KNOWN_ATTACKS)
 
         # These _are_ modifyable, but not explicitly advertised.
         self.known_attack_scales = DetectJailbreak.DEFAULT_KNOWN_ATTACK_SCALE_FACTORS
@@ -233,6 +241,9 @@ class DetectJailbreak(Validator):
             prompts: List[str],
             reduction_function: Optional[Callable] = max,
     ) -> Union[List[float], List[dict]]:
+        """predict_jailbreak will return an array of floats by default, one per prompt.
+        If reduction_function is set to 'none' it will return a dict with the different
+        sub-validators and their scores. Useful for debugging and tuning."""
         if isinstance(prompts, str):
             print("WARN: predict_jailbreak should be called with a list of strings.")
             prompts = [prompts, ]
@@ -271,7 +282,9 @@ class DetectJailbreak(Validator):
         if isinstance(value, str):
             value = [value, ]
 
-        scores = self.predict_jailbreak(value)
+        # _inference is to support local/remote. It is equivalent to this:
+        # scores = self.predict_jailbreak(value)
+        scores = self._inference(value)
 
         failed_prompts = list()
         failed_scores = list()  # To help people calibrate their thresholds.
@@ -289,3 +302,21 @@ class DetectJailbreak(Validator):
                 error_message=failure_message
             )
         return PassResult()
+
+    # The rest of these methods are made for validator compatibility and may have some
+    # strange properties,
+
+    def _inference_local(self, model_input: List[str]) -> Any:
+        return self.predict_jailbreak(model_input)
+
+    def _inference_remote(self, model_input: List[str]) -> Any:
+        # This needs to be kept in-sync with app_inference_spec.
+        request_body = {"prompts": model_input}
+        response = self._hub_inference_request(
+            json.dumps(request_body),
+            self.validation_endpoint
+        )
+        if not response or "scores" not in response:
+            raise ValueError("Invalid response from remote inference", response)
+
+        return response["scores"]

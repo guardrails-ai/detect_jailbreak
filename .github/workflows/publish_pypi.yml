@@ -3,8 +3,9 @@ name: Publish to Guardrails Hub
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    # Publish when new releases are tagged.
+    tags:
+      - '*'
 
 jobs:
   setup:
