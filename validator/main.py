@@ -77,6 +77,15 @@ class DetectJailbreak(Validator):
         self.embedding_model = None
         self.known_malicious_embeddings = []
 
+        # It's possible for self.use_local to be unset and in some indeterminate state.
+        # First take use_local as a kwarg as the truth.
+        # If that's not present, try self.use_local.
+        # If that's not present, default to true.
+        if "use_local" in kwargs:
+            self.use_local = kwargs["use_local"]
+        elif self.use_local is None:
+            self.use_local = True
+
         if self.use_local:
             if not model_path_override:
                 self.saturation_attack_detector = PromptSaturationDetectorV3(

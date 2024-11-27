@@ -42,7 +42,8 @@ class InferenceSpec(BaseInferenceSpec):
 
     def load(self):
         kwargs = {
-            "device": self.device_name
+            "device": self.device_name,
+            "use_local": True
         }
         read_from = os.environ.get("MODEL_PATH", "s3").lower()
         if read_from == "s3":
