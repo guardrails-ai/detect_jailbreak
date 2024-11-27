@@ -103,7 +103,7 @@ class DetectJailbreak(Validator):
                 AutoModel
             )
             self.embedding_tokenizer = embedding_tokenizer
-            self.embedding_model = embedding_model
+            self.embedding_model = embedding_model.to(device)
             # Other text attacks:
             self.text_classifier = get_pipeline_by_path(
                 model_path_override,
