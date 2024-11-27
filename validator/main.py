@@ -241,6 +241,9 @@ class DetectJailbreak(Validator):
             prompts: List[str],
             reduction_function: Optional[Callable] = max,
     ) -> Union[List[float], List[dict]]:
+        """predict_jailbreak will return an array of floats by default, one per prompt.
+        If reduction_function is set to 'none' it will return a dict with the different
+        sub-validators and their scores. Useful for debugging and tuning."""
         if isinstance(prompts, str):
             print("WARN: predict_jailbreak should be called with a list of strings.")
             prompts = [prompts, ]
@@ -308,16 +311,7 @@ class DetectJailbreak(Validator):
 
     def _inference_remote(self, model_input: List[str]) -> Any:
         # This needs to be kept in-sync with app_inference_spec.
-        request_body = {
-            "inputs": [  # Required for legacy reasons.
-                {
-                    "name": "prompts",
-                    "shape": [len(model_input)],
-                    "data": model_input,
-                    "datatype": "BYTES"
-                }
-            ]
-        }
+        request_body = {"prompts": model_input}
         response = self._hub_inference_request(
             json.dumps(request_body),
             self.validation_endpoint
