@@ -11,8 +11,9 @@ readme = "README.md"
 requires-python = ">= 3.9.0"
 dependencies = [
     "guardrails-ai>=0.5.10",
-    "torch>=2.4",
-    "transformers>=4.40",
+    "torch>=2.2.2",
+    "transformers>=4.39.3",
+    "numpy<2",
     "cached_path>=1.6"
 ]
 
