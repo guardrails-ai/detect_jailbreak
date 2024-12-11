@@ -4,7 +4,7 @@
 | --- |---------------|
 | Date of development | 2024/09/24    |
 | Validator type | Jailbreaking  |
-| Blog |               |
+| Blog | https://www.guardrailsai.com/blog/advanced-pii-and-jailbreak |
 | License | Apache 2      |
 | Input/Output | Input         |
 
