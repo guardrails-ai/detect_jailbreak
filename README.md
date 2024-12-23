@@ -27,7 +27,7 @@ While this model can help to prevent incidents, no model is perfect and should b
 ## Installation
 
 ```bash
-$ guardrails hub install hub://guardrails/detect-jailbreak
+$ guardrails hub install hub://guardrails/detect_jailbreak
 ```
 
 ## Usage Examples
